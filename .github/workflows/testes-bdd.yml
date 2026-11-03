@@ -43,7 +43,11 @@ jobs:
 
       - name: Coletar logs dos containers
         if: always()
-        run: docker compose logs --no-color > tests-bdd/target/containers.log 2>&1 || true
+        run: |
+          mkdir -p tests-bdd/target
+          docker compose logs --no-color > tests-bdd/target/containers.log 2>&1 || true
+          docker compose ps -a || true
+          tail -n 80 tests-bdd/target/containers.log || true
 
       - name: Publicar relatorios
         if: always()
