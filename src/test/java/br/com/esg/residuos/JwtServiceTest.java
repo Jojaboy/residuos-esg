@@ -28,7 +28,11 @@ class JwtServiceTest {
     void rejeitaTokenAdulterado() {
         String token = jwtService.gerarToken(new Usuario("Teste", "teste@esg.com", "hash", "ADMIN"));
 
-        assertThat(jwtService.tokenValido(token + "x")).isFalse();
+        int inicioDoConteudo = token.indexOf('.') + 1;
+        char trocado = token.charAt(inicioDoConteudo) == 'a' ? 'b' : 'a';
+        String adulterado = token.substring(0, inicioDoConteudo) + trocado + token.substring(inicioDoConteudo + 1);
+
+        assertThat(jwtService.tokenValido(adulterado)).isFalse();
         assertThat(jwtService.tokenValido("nao-e-um-jwt")).isFalse();
     }
 
