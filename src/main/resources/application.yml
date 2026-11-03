@@ -1,0 +1,53 @@
+# Configuracao base. Valores sensiveis vem de variaveis de ambiente
+# (definidas no docker-compose.yml / arquivos envs/*.env / secrets do GitHub).
+spring:
+  application:
+    name: residuos-esg
+  datasource:
+    url: ${DB_URL:jdbc:oracle:thin:@localhost:1521/XEPDB1}
+    username: ${DB_USER:esg_user}
+    password: ${DB_PASS:esg_pass}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      connection-timeout: 30000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+  flyway:
+    enabled: true
+    # Cada banco tem sua pasta de migrations: db/migration/oracle (producao) e db/migration/h2 (testes)
+    locations: classpath:db/migration/{vendor}
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+app:
+  version: '@project.version@'
+  environment: ${APP_ENV:local}
+  jwt:
+    secret: ${JWT_SECRET:troque-esta-chave-local-com-pelo-menos-32-caracteres}
+    expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    nome: Cidades ESG Inteligentes - Gestao de Residuos
+    ambiente: ${APP_ENV:local}
+
+logging:
+  level:
+    root: INFO

@@ -1,0 +1,15 @@
+# Perfil de PRODUCAO: log enxuto e pool de conexoes maior
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+
+logging:
+  level:
+    root: WARN
+    br.com.esg: INFO
+    org.springframework.boot.web.embedded: INFO
+
+springdoc:
+  swagger-ui:
+    enabled: true

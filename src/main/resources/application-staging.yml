@@ -1,0 +1,9 @@
+# Perfil de STAGING: mais log para facilitar a validacao antes de producao
+logging:
+  level:
+    br.com.esg: DEBUG
+    org.flywaydb: INFO
+
+springdoc:
+  swagger-ui:
+    enabled: true

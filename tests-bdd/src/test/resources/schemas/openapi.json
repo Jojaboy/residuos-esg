@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Documentacao OpenAPI",
+  "type": "object",
+  "required": [
+    "openapi",
+    "info",
+    "paths"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "openapi": {
+      "type": "string",
+      "minLength": 1
+    },
+    "info": {
+      "type": "object",
+      "required": [
+        "title",
+        "version"
+      ]
+    },
+    "paths": {
+      "type": "object"
+    }
+  }
+}

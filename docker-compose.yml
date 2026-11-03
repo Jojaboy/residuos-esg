@@ -1,0 +1,60 @@
+# Orquestracao: API Spring Boot + banco Oracle XE
+# O mesmo arquivo serve para local, staging e producao; o que muda sao as
+# variaveis de ambiente (arquivo .env local ou envs/staging.env / envs/production.env).
+name: ${COMPOSE_PROJECT_NAME:-residuos-esg}
+
+services:
+
+  oracle-db:
+    image: gvenzl/oracle-xe:21-slim-faststart
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:?defina ORACLE_PASSWORD}
+      APP_USER: ${DB_USER:?defina DB_USER}
+      APP_USER_PASSWORD: ${DB_PASS:?defina DB_PASS}
+    volumes:
+      - oracle-data:/opt/oracle/oradata          # dados persistem entre reinicios
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    networks:
+      - backend                                   # banco fica isolado na rede interna
+    # sem "ports": o banco nao e exposto para fora do Docker
+
+  app:
+    image: ${APP_IMAGE:-residuos-esg:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      oracle-db:
+        condition: service_healthy                # so sobe depois do Oracle estar pronto
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-default}
+      DB_URL: jdbc:oracle:thin:@oracle-db:1521/XEPDB1
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0}
+      LOGGING_FILE_NAME: /app/logs/residuos-esg.log   # log em arquivo, guardado no volume app-logs
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - app-logs:/app/logs
+    networks:
+      - backend
+      - frontend
+
+volumes:
+  oracle-data:
+  app-logs:
+
+networks:
+  backend:
+    internal: true        # sem acesso a internet: so a app conversa com o banco
+  frontend:

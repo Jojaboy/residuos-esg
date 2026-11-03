@@ -1,0 +1,12 @@
+# Perfil de TESTES: banco H2 em memoria, nao precisa de Oracle nem de Docker
+spring:
+  datasource:
+    url: jdbc:h2:mem:esgdb;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+app:
+  environment: test
+  jwt:
+    secret: chave-de-testes-automatizados-com-mais-de-32-caracteres

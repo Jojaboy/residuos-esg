@@ -1,0 +1,17 @@
+# Complementa o docker-compose.yml da raiz, adicionando o servico que roda os testes.
+# Execute a partir da raiz do projeto:
+#   docker compose -f docker-compose.yml -f tests-bdd/docker-compose.testes.yml \
+#     up --build --abort-on-container-exit --exit-code-from testes-bdd
+services:
+  testes-bdd:
+    build:
+      context: ./tests-bdd
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      BASE_URL: http://app:8080
+    volumes:
+      - ./tests-bdd/reports:/testes/target
+    networks:
+      - frontend

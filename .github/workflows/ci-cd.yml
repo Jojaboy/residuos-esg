@@ -1,0 +1,320 @@
+name: CI/CD - Cidades ESG Inteligentes
+
+# Quando o pipeline roda:
+#  - push na main     -> build, testes, imagem, deploy STAGING e deploy PRODUCAO
+#  - push na develop  -> build, testes, imagem e deploy STAGING
+#  - pull request     -> somente build e testes (validacao do codigo)
+#  - manual (botao "Run workflow" na aba Actions)
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Evita dois deploys do mesmo branch rodando ao mesmo tempo
+concurrency:
+  group: cicd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write   # publicar a imagem no GitHub Container Registry (ghcr.io)
+
+env:
+  JAVA_VERSION: "17"
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # 1) BUILD - compila o codigo e gera o .jar
+  # ---------------------------------------------------------------------------
+  build:
+    name: 1. Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Compilar e empacotar (mvn package)
+        run: mvn -B package -DskipTests
+
+      - name: Publicar o .jar como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: residuos-esg-jar
+          path: target/residuos-esg.jar
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 2) TESTES - roda os testes automatizados (JUnit 5 + MockMvc + H2)
+  # ---------------------------------------------------------------------------
+  test:
+    name: 2. Testes automatizados
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Executar testes (mvn test)
+        run: mvn -B test
+
+      - name: Resumo dos testes
+        if: always()
+        run: |
+          if ls target/surefire-reports/*.txt >/dev/null 2>&1; then
+            read total falhas erros pulados < <(grep -h "Tests run:" target/surefire-reports/*.txt \
+              | awk -F'[ ,]+' '{t+=$3; f+=$5; e+=$7; s+=$9} END {print t, f, e, s}')
+            {
+              echo "## Testes automatizados"
+              echo ""
+              echo "| Total | Falhas | Erros | Ignorados |"
+              echo "|------:|-------:|------:|----------:|"
+              echo "| $total | $falhas | $erros | $pulados |"
+              echo ""
+              echo "| Classe de teste | Resultado |"
+              echo "|---|---|"
+              for f in target/surefire-reports/*.txt; do
+                classe=$(basename "$f" .txt | sed 's/^br.com.esg.residuos.//')
+                linha=$(grep -h "Tests run:" "$f" | cut -d',' -f1-4)
+                echo "| $classe | $linha |"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Publicar relatorios de teste
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-testes
+          path: target/surefire-reports/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 3) IMAGEM DOCKER - constroi e publica no GitHub Container Registry
+  # ---------------------------------------------------------------------------
+  docker:
+    name: 3. Build e publicacao da imagem Docker
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+    outputs:
+      image: ${{ steps.nome.outputs.repo }}:sha-${{ steps.nome.outputs.sha }}
+      repo: ${{ steps.nome.outputs.repo }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Definir nome da imagem (ghcr exige letras minusculas)
+        id: nome
+        run: |
+          echo "repo=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadados da imagem (tags e labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.nome.outputs.repo }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=ref,event=branch
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build e push da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resumo da imagem
+        run: |
+          {
+            echo "## Imagem Docker publicada"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 4) DEPLOY STAGING - sobe app + Oracle com docker compose e valida
+  # ---------------------------------------------------------------------------
+  deploy-staging:
+    name: 4. Deploy Staging
+    runs-on: ubuntu-latest
+    needs: docker
+    environment:
+      name: staging
+    env:
+      ENV_FILE: envs/staging.env
+      APP_IMAGE: ${{ needs.docker.outputs.image }}
+      URL: http://localhost:8081
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir ambiente de staging (docker compose)
+        env:
+          SECRET_JWT: ${{ secrets.STAGING_JWT_SECRET }}
+        run: |
+          # Se existir o secret no GitHub, ele substitui o valor do arquivo envs/staging.env
+          if [ -n "$SECRET_JWT" ]; then export JWT_SECRET="$SECRET_JWT"; fi
+          docker compose --env-file "$ENV_FILE" pull
+          docker compose --env-file "$ENV_FILE" up -d --no-build --wait --wait-timeout 600
+          docker compose --env-file "$ENV_FILE" ps
+
+      - name: Smoke test do staging
+        run: bash scripts/smoke-test.sh "$URL" staging | tee smoke-staging.txt
+
+      - name: Evidencias do staging no resumo do pipeline
+        if: always()
+        run: |
+          {
+            echo "## Staging no ar"
+            echo ""
+            echo "Imagem: \`$APP_IMAGE\`"
+            echo ""
+            echo "### docker compose ps"
+            echo '```'
+            docker compose --env-file "$ENV_FILE" ps
+            echo '```'
+            echo "### GET /api/info"
+            echo '```json'
+            curl -s "$URL/api/info" | jq . || true
+            echo '```'
+            echo "### GET /actuator/health"
+            echo '```json'
+            curl -s "$URL/actuator/health" | jq . || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Promover imagem para a tag :staging
+        run: |
+          docker tag "$APP_IMAGE" "${{ needs.docker.outputs.repo }}:staging"
+          docker push "${{ needs.docker.outputs.repo }}:staging"
+
+      - name: Coletar logs dos containers
+        if: always()
+        run: |
+          mkdir -p deploy-logs
+          docker compose --env-file "$ENV_FILE" logs --no-color > deploy-logs/staging-containers.log || true
+          cp smoke-staging.txt deploy-logs/ 2>/dev/null || true
+
+      - name: Publicar logs do deploy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-deploy-staging
+          path: deploy-logs/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 5) DEPLOY PRODUCAO - somente na main e somente se o staging passou
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    name: 5. Deploy Producao
+    runs-on: ubuntu-latest
+    needs: [docker, deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+    env:
+      ENV_FILE: envs/production.env
+      APP_IMAGE: ${{ needs.docker.outputs.image }}
+      URL: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login no GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir ambiente de producao (docker compose)
+        env:
+          SECRET_JWT: ${{ secrets.PROD_JWT_SECRET }}
+        run: |
+          if [ -n "$SECRET_JWT" ]; then export JWT_SECRET="$SECRET_JWT"; fi
+          docker compose --env-file "$ENV_FILE" pull
+          docker compose --env-file "$ENV_FILE" up -d --no-build --wait --wait-timeout 600
+          docker compose --env-file "$ENV_FILE" ps
+
+      - name: Smoke test da producao
+        run: bash scripts/smoke-test.sh "$URL" production | tee smoke-production.txt
+
+      - name: Evidencias da producao no resumo do pipeline
+        if: always()
+        run: |
+          {
+            echo "## Producao no ar"
+            echo ""
+            echo "Imagem: \`$APP_IMAGE\`"
+            echo ""
+            echo "### docker compose ps"
+            echo '```'
+            docker compose --env-file "$ENV_FILE" ps
+            echo '```'
+            echo "### GET /api/info"
+            echo '```json'
+            curl -s "$URL/api/info" | jq . || true
+            echo '```'
+            echo "### GET /actuator/health"
+            echo '```json'
+            curl -s "$URL/actuator/health" | jq . || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Promover imagem para as tags :production e :latest
+        run: |
+          for tag in production latest; do
+            docker tag "$APP_IMAGE" "${{ needs.docker.outputs.repo }}:$tag"
+            docker push "${{ needs.docker.outputs.repo }}:$tag"
+          done
+
+      - name: Coletar logs dos containers
+        if: always()
+        run: |
+          mkdir -p deploy-logs
+          docker compose --env-file "$ENV_FILE" logs --no-color > deploy-logs/production-containers.log || true
+          cp smoke-production.txt deploy-logs/ 2>/dev/null || true
+
+      - name: Publicar logs do deploy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-deploy-production
+          path: deploy-logs/
+          retention-days: 7

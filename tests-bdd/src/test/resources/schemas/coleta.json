@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Coleta",
+  "type": "object",
+  "required": [
+    "id",
+    "pontoColetaId",
+    "pontoColetaNome",
+    "tipoResiduo",
+    "dataColeta",
+    "quantidadeKg",
+    "status",
+    "observacao"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pontoColetaId": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pontoColetaNome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tipoResiduo": {
+      "type": "string",
+      "enum": [
+        "PLASTICO",
+        "PAPEL",
+        "VIDRO",
+        "METAL",
+        "ORGANICO",
+        "ELETRONICO"
+      ]
+    },
+    "dataColeta": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "quantidadeKg": {
+      "type": "number",
+      "minimum": 0.1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "AGENDADA",
+        "CONCLUIDA",
+        "CANCELADA"
+      ]
+    },
+    "observacao": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}

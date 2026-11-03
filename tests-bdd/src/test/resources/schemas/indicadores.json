@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "Indicadores ESG",
+  "type": "object",
+  "required": [
+    "totalPontosColeta",
+    "totalColetas",
+    "coletasAgendadas",
+    "coletasConcluidas",
+    "totalKgReciclado"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "totalPontosColeta": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalColetas": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "coletasAgendadas": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "coletasConcluidas": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalKgReciclado": {
+      "type": "number",
+      "minimum": 0
+    }
+  }
+}
